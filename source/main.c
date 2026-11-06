@@ -119,17 +119,17 @@ static void play(int id, float vol) {
     float mix[12] = {0};
     mix[0] = vol;
     mix[1] = vol;
-    ndspChanReset(id);
-    ndspChanSetInterp(id, NDSP_INTERP_LINEAR);
-    ndspChanSetRate(id, (float)SR);
-    ndspChanSetFormat(id, NDSP_FORMAT_MONO_PCM16);
-    ndspChanSetMix(id, mix);
+    ndspChnReset(id);
+    ndspChnSetInterp(id, NDSP_INTERP_LINEAR);
+    ndspChnSetRate(id, (float)SR);
+    ndspChnSetFormat(id, NDSP_FORMAT_MONO_PCM16);
+    ndspChnSetMix(id, mix);
     memset(&s->wb, 0, sizeof(ndspWaveBuf));
     s->wb.data_vaddr = s->buf;
     s->wb.nsamples = s->n;
     s->wb.looping = (id == S_DRONE);
     DSP_FlushDataCache(s->buf, s->n * sizeof(s16));
-    ndspChanWaveBufAdd(id, &s->wb);
+    ndspChnWaveBufAdd(id, &s->wb);
 }
 
 /* ================= SPIELLOGIK ================= */
