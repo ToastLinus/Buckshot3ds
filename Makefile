@@ -8,7 +8,7 @@ LDFLAGS := -specs=3dsx.specs -g $(ARCH) -L$(CTRULIB)/lib
 all: buckshot.3dsx
 
 buckshot.elf: source/main.c
-	arm-none-eabi-gcc $(CFLAGS) $< $(LDFLAGS) -lctru -lm -o $@
+	arm-none-eabi-gcc $(CFLAGS) $< $(LDFLAGS) -lcitro2d -lcitro3d -lctru -lm -o $@
 
 buckshot.3dsx: buckshot.elf
 	3dsxtool $< $@
