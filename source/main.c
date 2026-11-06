@@ -11,6 +11,8 @@
 #define MAXI 8
 #define PI 3.14159265f
 #define SR 32000
+#define AIMT 50
+#define FIRET 75
 #define C(r,g,b) C2D_Color32(r,g,b,255)
 #define CA(r,g,b,a) C2D_Color32(r,g,b,a)
 
@@ -18,13 +20,16 @@ enum { NONE, LUPE, BIER, HANDS, ZIGA, SAEGE };
 static const char *iname[] = {"", "Lupe", "Bier", "Fessel", "Zigarette", "Säge"};
 
 /* ================= TON ================= */
-enum { S_SHOT, S_CLICK, S_COCK, S_PING, S_BEER, S_CUFF, S_HEAL, S_SAW, S_TICK, S_WIN, S_LOSE, S_ERR, S_DRONE, NSND };
-static const float sndLen[NSND] = {0.7f, 0.12f, 0.35f, 0.5f, 0.6f, 0.35f, 0.5f, 0.6f, 0.05f, 0.8f, 0.9f, 0.15f, 2.0f};
+enum { S_SHOT, S_SHOT2, S_SHOT3, S_CLICK, S_CLICK2, S_COCK, S_PING, S_BEER, S_CUFF, S_HEAL, S_SAW, S_TICK,
+       S_WIN, S_LOSE, S_ERR, S_HURT, S_START, S_ROUND, S_DRONE, S_MENU, NSND };
+static const float sndLen[NSND] = {0.7f, 0.8f, 0.9f, 0.12f, 0.15f, 0.35f, 0.5f, 0.6f, 0.35f, 0.5f, 0.6f, 0.06f,
+                                   0.8f, 0.9f, 0.15f, 0.4f, 0.4f, 0.8f, 2.0f, 4.0f};
 typedef struct { s16 *buf; int n; ndspWaveBuf wb; } Snd;
 static Snd snd[NSND];
-static int audioOK;
+static int audioOK, soundOn = 1;
 
 static float rnd(void) { return rand() / (float)RAND_MAX * 2.0f - 1.0f; }
+static float minf(float a, float b) { return a < b ? a : b; }
 
 static float sampleOf(int id, float t, float *lp) {
     float n = rnd(), v = 0;
@@ -33,8 +38,21 @@ static float sampleOf(int id, float t, float *lp) {
             *lp = *lp * 0.7f + n * 0.3f;
             v = *lp * 2.2f * expf(-t * 8) + sinf(2 * PI * 55 * t) * expf(-t * 6) + 0.4f * sinf(2 * PI * 110 * t) * expf(-t * 12);
             break;
+        case S_SHOT2:
+            *lp = *lp * 0.85f + n * 0.15f;
+            v = *lp * 3.0f * expf(-t * 6) + sinf(2 * PI * 40 * t) * expf(-t * 5) + 0.3f * sinf(2 * PI * 80 * t) * expf(-t * 9);
+            break;
+        case S_SHOT3: {
+            float b = t - 0.25f;
+            v = n * expf(-t * 14) + sinf(2 * PI * 70 * t) * expf(-t * 8) * 0.8f;
+            if (b > 0) v += 0.4f * n * expf(-b * 14);
+            break;
+        }
         case S_CLICK:
             v = n * expf(-t * 90) * 0.5f + sinf(2 * PI * 1800 * t) * expf(-t * 70) * 0.4f;
+            break;
+        case S_CLICK2:
+            v = sinf(2 * PI * 600 * t) * expf(-t * 50) * 0.5f + n * expf(-t * 120) * 0.3f;
             break;
         case S_COCK: {
             float b = t - 0.14f;
@@ -85,9 +103,38 @@ static float sampleOf(int id, float t, float *lp) {
         case S_ERR:
             v = (sinf(2 * PI * 150 * t) > 0 ? 1.0f : -1.0f) * 0.25f * expf(-t * 15);
             break;
+        case S_HURT:
+            *lp = *lp * 0.8f + n * 0.2f;
+            v = sinf(2 * PI * 60 * t) * expf(-t * 9) * 0.9f + *lp * expf(-t * 20) * 0.8f;
+            break;
+        case S_START: {
+            int k = (int)(t / 0.15f);
+            if (k > 1) k = 1;
+            float a = t - k * 0.15f;
+            float f = k ? 587.3f : 392.0f;
+            v = sinf(2 * PI * f * a) * expf(-a * 5) * 0.5f + 0.2f * sinf(2 * PI * 2 * f * a) * expf(-a * 8);
+            break;
+        }
+        case S_ROUND: {
+            static const float nt[4] = {110.0f, 138.6f, 164.8f, 110.0f};
+            int k = (int)(t / 0.2f);
+            if (k > 3) k = 3;
+            float a = t - k * 0.2f;
+            v = (sinf(2 * PI * nt[k] * a) * 0.5f + (fmodf(a * nt[k], 1.0f) * 2 - 1) * 0.15f) * expf(-a * 3);
+            break;
+        }
         case S_DRONE:
             v = (sinf(2 * PI * 55 * t) * 0.6f + sinf(2 * PI * 82.5f * t) * 0.4f) * (0.6f + 0.4f * sinf(2 * PI * 0.5f * t));
             break;
+        case S_MENU: {
+            static const float nt[8] = {220.0f, 261.6f, 329.6f, 261.6f, 246.9f, 196.0f, 220.0f, 164.8f};
+            int k = (int)(t / 0.5f);
+            if (k > 7) k = 7;
+            float a = t - k * 0.5f;
+            float env = minf(1.0f, a * 60) * minf(1.0f, (0.5f - a) * 60) * expf(-a * 4);
+            v = (sinf(2 * PI * nt[k] * a) * 0.5f + sinf(2 * PI * 2 * nt[k] * a) * 0.15f) * env + sinf(2 * PI * 55 * t) * 0.25f;
+            break;
+        }
     }
     return v;
 }
@@ -113,8 +160,7 @@ static void initAudio(void) {
     audioOK = 1;
 }
 
-static void play(int id, float vol) {
-    if (!audioOK) return;
+static void playRaw(int id, float vol) {
     Snd *s = &snd[id];
     float mix[12] = {0};
     mix[0] = vol;
@@ -127,9 +173,23 @@ static void play(int id, float vol) {
     memset(&s->wb, 0, sizeof(ndspWaveBuf));
     s->wb.data_vaddr = s->buf;
     s->wb.nsamples = s->n;
-    s->wb.looping = (id == S_DRONE);
+    s->wb.looping = (id == S_DRONE || id == S_MENU);
     DSP_FlushDataCache(s->buf, s->n * sizeof(s16));
     ndspChnWaveBufAdd(id, &s->wb);
+}
+
+static void play(int id, float vol) {
+    if (!audioOK || !soundOn) return;
+    playRaw(id, vol);
+}
+
+static void setMusic(int menu) {
+    if (!audioOK) return;
+    ndspChnReset(S_DRONE);
+    ndspChnReset(S_MENU);
+    if (!soundOn) return;
+    if (menu) playRaw(S_MENU, 0.25f);
+    else playRaw(S_DRONE, 0.12f);
 }
 
 /* ================= SPIELLOGIK ================= */
@@ -141,8 +201,9 @@ typedef struct {
 static Fighter pl, dl;
 static int shells[8], nsh, pos, liveLeft, blankLeft, loadLive, loadBlank;
 static int peek[2];
+static int scene, quit;
 static int round_, turn, state, dealT, pendingNext, needReload;
-static int banner;
+static int banner, bannerT;
 static char bannerTitle[32];
 static int animState, animT, shotShooter, shotSelf, fireLive, fireDmg, fireHitPlayer;
 static char msgs[2][56];
@@ -188,7 +249,8 @@ static void load(const char *title) {
         giveItems(&dl, round_);
     }
     snprintf(bannerTitle, sizeof(bannerTitle), "%s", title);
-    banner = 170;
+    banner = 1;
+    bannerT = 0;
     play(S_COCK, 0.8f);
 }
 
@@ -200,7 +262,7 @@ static void startRound(void) {
     pl.hp = pl.maxhp = mh;
     dl.hp = dl.maxhp = mh;
     turn = 0;
-    dealT = 40;
+    dealT = 70;
     snprintf(t, sizeof(t), "RUNDE %d", round_);
     load(t);
 }
@@ -287,7 +349,9 @@ static void resolveShot(void) {
     fireLive = live;
     fireDmg = dmg;
     fireHitPlayer = (t == &pl);
-    play(live ? S_SHOT : S_CLICK, live ? 1.0f : 0.8f);
+    if (live) play(S_SHOT + rand() % 3, 1.0f);
+    else play(S_CLICK + rand() % 2, 0.8f);
+    if (dmg > 0) play(S_HURT, 0.8f);
     addlog("%s -> %s: %s%s", name(shooter), self ? "sich selbst" : name(1 - shooter),
            live ? "SCHARF" : "BLIND", dmg == 2 ? " (x2)" : "");
 
@@ -425,29 +489,25 @@ static int aimAtDealer(void) { return shotSelf ? (shotShooter == 1) : (shotShoot
 static void drawTop(void) {
     float shx = 0, shy = 0;
     if (animState == 2 && fireLive) {
-        float k = (40 - animT) / 40.0f;
-        shx = sinf(animT * 2.1f) * 8 * k;
-        shy = cosf(animT * 1.7f) * 8 * k;
+        float k = (FIRET - animT) / (float)FIRET;
+        shx = sinf(animT * 2.1f) * 6 * k;
+        shy = cosf(animT * 1.7f) * 6 * k;
     }
     C2D_ViewReset();
     C2D_ViewTranslate(shx, shy);
 
-    /* Wand + Licht */
     C2D_DrawRectangle(-20, -20, 0, W + 40, 190, C(16, 12, 14), C(16, 12, 14), C(34, 24, 26), C(34, 24, 26));
     C2D_DrawCircleSolid(200, 100, 0, 120, CA(255, 235, 190, 12));
     C2D_DrawCircleSolid(200, 100, 0, 85, CA(255, 235, 190, 14));
     C2D_DrawCircleSolid(200, 100, 0, 55, CA(255, 235, 190, 16));
 
-    /* Dealer */
-    int hurt = (animState == 2 && !fireHitPlayer && fireLive && fireDmg > 0 && animT < 14);
-    drawDealer(200 + (hurt ? sinf(animT * 3.0f) * 3 : 0), 88 + sinf(frame * 0.04f) * 2, hurt);
+    int hurt = (animState == 2 && !fireHitPlayer && fireLive && fireDmg > 0 && animT < 24);
+    drawDealer(200 + (hurt ? sinf(animT * 1.5f) * 3 : 0), 88 + sinf(frame * 0.04f) * 2, hurt);
     if (dl.cuffed) icon(HANDS, 232, 52, 1.0f);
 
-    /* Tisch */
     C2D_DrawRectangle(-20, 150, 0, W + 40, 110, C(96, 60, 34), C(96, 60, 34), C(44, 26, 14), C(44, 26, 14));
     C2D_DrawRectSolid(-20, 150, 0, W + 40, 3, C(150, 100, 58));
 
-    /* Dealer-Items */
     int k = 0;
     for (int i = 0; i < MAXI; i++) {
         if (dl.items[i]) {
@@ -456,18 +516,17 @@ static void drawTop(void) {
         }
     }
 
-    /* Schrotflinte */
     float idle = -PI / 2 + sinf(frame * 0.03f) * 0.05f;
     float ang = idle;
     float recoil = 0;
     if (animState == 1) {
         float tgt = aimAtDealer() ? -PI / 2 : PI / 2;
-        float kk = animT / 28.0f;
+        float kk = animT / (float)AIMT;
         kk = kk * kk * (3 - 2 * kk);
         ang = idle + (tgt - idle) * kk;
     } else if (animState == 2) {
         ang = aimAtDealer() ? -PI / 2 : PI / 2;
-        if (fireLive && animT < 10) recoil = 14.0f * (1 - animT / 10.0f);
+        if (fireLive && animT < 16) recoil = 14.0f * (1 - animT / 16.0f);
     }
     float ca = cosf(ang), sa = sinf(ang);
     float cx = 200 - ca * recoil, cy = 218 - sa * recoil;
@@ -478,7 +537,6 @@ static void drawTop(void) {
     C2D_DrawLine(cx + ca * 28, cy + sa * 28, wood2, cx + ca * 60, cy + sa * 60, wood2, 11, 0);
     if (my > 226) my = 226;
 
-    /* Leben */
     txtS("DEALER", 10, 6, 0.45f, C(230, 230, 230), 0);
     for (int i = 0; i < dl.maxhp; i++) heart(10 + i * 19, 24, 17, i < dl.hp ? C(220, 40, 60) : C(70, 40, 46));
     if (dl.cuffed) txtS("[Fessel]", 10, 44, 0.4f, C(200, 200, 220), 0);
@@ -488,7 +546,6 @@ static void drawTop(void) {
     if (pl.cuffed) txtS("[Fessel]", 10, 198, 0.4f, C(200, 200, 220), 0);
     if (pl.saw) txtS("[Säge]", 62, 198, 0.4f, C(230, 180, 90), 0);
 
-    /* Runde + Patronen */
     char buf[48];
     snprintf(buf, sizeof(buf), "Runde %d/3", round_);
     txtS(buf, W - 10, 6, 0.45f, C(230, 230, 230), 2);
@@ -496,41 +553,38 @@ static void drawTop(void) {
     int tot = liveLeft + blankLeft;
     for (int i = 0; i < tot; i++) shellPip(W - 14 - i * 13, 42, 9, 20, i < liveLeft);
 
-    /* Effekte */
     if (animState == 2) {
-        if (fireLive && animT < 14) {
-            float r = 44.0f * (1 - animT / 14.0f) + 8;
+        if (fireLive && animT < 20) {
+            float r = 44.0f * (1 - animT / 20.0f) + 8;
             C2D_DrawCircleSolid(mx, my, 0, r, CA(255, 120, 20, 230));
             C2D_DrawCircleSolid(mx, my, 0, r * 0.7f, CA(255, 220, 60, 240));
             C2D_DrawCircleSolid(mx, my, 0, r * 0.4f, C(255, 255, 255));
         }
-        if (!fireLive && animT < 24) txtS("*klick*", mx, my - 30 - animT, 0.6f, C(210, 210, 210), 1);
-        if (fireLive && animT < 6) C2D_DrawRectSolid(-20, -20, 0, W + 40, 280, CA(255, 255, 230, (int)(200 * (1 - animT / 6.0f))));
-        if (fireLive && fireHitPlayer && fireDmg > 0 && animT < 30)
-            C2D_DrawRectSolid(-20, -20, 0, W + 40, 280, CA(200, 0, 0, (int)(130 * (1 - animT / 30.0f))));
+        if (!fireLive && animT < 40) txtS("*klick*", mx, my - 30 - animT * 0.5f, 0.6f, C(210, 210, 210), 1);
+        if (fireLive && animT < 8) C2D_DrawRectSolid(-20, -20, 0, W + 40, 280, CA(255, 255, 230, (int)(150 * (1 - animT / 8.0f))));
+        if (fireLive && fireHitPlayer && fireDmg > 0 && animT < 45)
+            C2D_DrawRectSolid(-20, -20, 0, W + 40, 280, CA(200, 0, 0, (int)(100 * (1 - animT / 45.0f))));
     }
 
     C2D_ViewReset();
 
-    /* Log */
     C2D_DrawRectSolid(0, 212, 0, W, 28, CA(0, 0, 0, 180));
     txt(msgs[0], 8, 212, 0.4f, C(150, 150, 150), 0);
     txt(msgs[1], 8, 225, 0.4f, C(240, 240, 240), 0);
 
-    /* Banner (Nachladen) */
-    if (banner > 0) {
+    if (banner) {
         C2D_DrawRectSolid(30, 40, 0, 340, 150, CA(0, 0, 0, 225));
         C2D_DrawRectSolid(30, 40, 0, 340, 3, C(170, 30, 30));
         C2D_DrawRectSolid(30, 187, 0, 340, 3, C(170, 30, 30));
-        txtS(bannerTitle, 200, 52, 0.8f, C(240, 240, 240), 1);
+        txtS(bannerTitle, 200, 50, 0.8f, C(240, 240, 240), 1);
         snprintf(buf, sizeof(buf), "%d scharf   %d blind", loadLive, loadBlank);
-        txtS(buf, 200, 92, 0.55f, C(230, 200, 120), 1);
+        txtS(buf, 200, 88, 0.55f, C(230, 200, 120), 1);
         int tn = loadLive + loadBlank;
         float x0 = 200 - tn * 11.0f;
-        for (int i = 0; i < tn; i++) shellPip(x0 + i * 22, 125, 16, 40, i < loadLive);
+        for (int i = 0; i < tn; i++) shellPip(x0 + i * 22, 118, 16, 40, i < loadLive);
+        if (bannerT > 45 && (frame / 30) % 2 == 0) txt("Tippen zum Weitermachen", 200, 164, 0.4f, C(200, 200, 200), 1);
     }
 
-    /* Spielende */
     if (state != 0 && animState == 0) {
         C2D_DrawRectSolid(0, 0, 0, W, 240, CA(0, 0, 0, 200));
         if (state == 1) txtS("DU HAST GEWONNEN!", 200, 90, 0.9f, C(120, 230, 120), 1);
@@ -541,6 +595,14 @@ static void drawTop(void) {
 typedef struct { int x, y, w, h; } Rect;
 static const Rect BTN_D = {10, 22, 148, 62};
 static const Rect BTN_S = {162, 22, 148, 62};
+static const Rect BTN_M = {250, 2, 64, 22};
+static const Rect MB_START = {20, 34, 280, 52};
+static const Rect MB_HOW = {20, 96, 280, 52};
+static const Rect MB_SND = {20, 158, 136, 52};
+static const Rect MB_QUIT = {164, 158, 136, 52};
+static const Rect MB_BACK = {60, 196, 200, 38};
+static const Rect GO_AGAIN = {20, 120, 130, 70};
+static const Rect GO_MENU = {170, 120, 130, 70};
 
 static Rect slotRect(int i) {
     Rect r = {6 + (i % 4) * 78, 94 + (i / 4) * 72, 74, 66};
@@ -549,11 +611,11 @@ static Rect slotRect(int i) {
 
 static int inRect(Rect r, int px, int py) { return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h; }
 
-static void button(Rect r, const char *label, u32 col, int pressed) {
+static void button(Rect r, const char *label, u32 col, int pressed, float sc) {
     u32 c = pressed ? col + 0x00303030 : col;
     C2D_DrawRectSolid(r.x, r.y, 0, r.w, r.h, C(10, 10, 10));
     C2D_DrawRectSolid(r.x + 3, r.y + 3, 0, r.w - 6, r.h - 6, c);
-    txtS(label, r.x + r.w / 2.0f, r.y + r.h / 2.0f - 10, 0.6f, C(255, 255, 255), 1);
+    txtS(label, r.x + r.w / 2.0f, r.y + r.h / 2.0f - sc * 17, sc, C(255, 255, 255), 1);
 }
 
 static void drawBottom(int touching, int tx, int ty) {
@@ -561,14 +623,16 @@ static void drawBottom(int touching, int tx, int ty) {
     C2D_DrawRectSolid(0, 0, 0, 320, 240, C(14, 14, 20));
     if (state != 0) {
         txtS(state == 1 ? "GEWONNEN!" : "VERLOREN", 160, 60, 0.9f, C(240, 240, 240), 1);
-        button((Rect){60, 120, 200, 70}, "NOCHMAL", C(150, 30, 30), touching);
+        button(GO_AGAIN, "NOCHMAL", C(150, 30, 30), touching && inRect(GO_AGAIN, tx, ty), 0.6f);
+        button(GO_MENU, "MENÜ", C(50, 60, 90), touching && inRect(GO_MENU, tx, ty), 0.6f);
         return;
     }
     int mine = (turn == 0 && !animState && !banner);
     txtS(turn == 0 ? "DEIN ZUG" : "DEALER ÜBERLEGT...", 160, 2, 0.5f, C(230, 230, 230), 1);
+    button(BTN_M, "MENÜ", C(50, 50, 60), touching && inRect(BTN_M, tx, ty), 0.4f);
     u32 gray = C(60, 60, 66);
-    button(BTN_D, "DEALER", mine ? C(150, 30, 30) : gray, mine && touching && inRect(BTN_D, tx, ty));
-    button(BTN_S, "SELBST", mine ? C(40, 70, 130) : gray, mine && touching && inRect(BTN_S, tx, ty));
+    button(BTN_D, "DEALER", mine ? C(150, 30, 30) : gray, mine && touching && inRect(BTN_D, tx, ty), 0.6f);
+    button(BTN_S, "SELBST", mine ? C(40, 70, 130) : gray, mine && touching && inRect(BTN_S, tx, ty), 0.6f);
     txtS("Items", 160, 76, 0.4f, C(170, 170, 170), 1);
     for (int i = 0; i < MAXI; i++) {
         Rect r = slotRect(i);
@@ -583,6 +647,59 @@ static void drawBottom(int touching, int tx, int ty) {
     }
 }
 
+static void drawMenuTop(void) {
+    C2D_ViewReset();
+    C2D_DrawRectangle(0, 0, 0, W, 240, C(12, 9, 11), C(12, 9, 11), C(40, 28, 30), C(40, 28, 30));
+    C2D_DrawCircleSolid(200, 140, 0, 130, CA(255, 235, 190, 12));
+    C2D_DrawCircleSolid(200, 140, 0, 90, CA(255, 235, 190, 14));
+    C2D_DrawCircleSolid(200, 140, 0, 60, CA(255, 235, 190, 16));
+    drawDealer(200, 138 + sinf(frame * 0.04f) * 2, 0);
+    C2D_DrawRectangle(0, 200, 0, W, 40, C(96, 60, 34), C(96, 60, 34), C(44, 26, 14), C(44, 26, 14));
+    C2D_DrawRectSolid(0, 200, 0, W, 3, C(150, 100, 58));
+    txtS("BUCKSHOT", 200, 4, 1.1f, C(235, 235, 235), 1);
+    txtS("ROULETTE", 200, 38, 1.1f, C(210, 40, 40), 1);
+}
+
+static void drawMenuBottom(int touching, int tx, int ty) {
+    C2D_ViewReset();
+    C2D_DrawRectSolid(0, 0, 0, 320, 240, C(14, 14, 20));
+    txtS("HAUPTMENÜ", 160, 6, 0.55f, C(200, 200, 200), 1);
+    button(MB_START, "SPIEL STARTEN", C(150, 30, 30), touching && inRect(MB_START, tx, ty), 0.65f);
+    button(MB_HOW, "ANLEITUNG", C(50, 60, 90), touching && inRect(MB_HOW, tx, ty), 0.6f);
+    const char *snl = !audioOK ? "TON FEHLT" : (soundOn ? "TON: AN" : "TON: AUS");
+    button(MB_SND, snl, C(50, 80, 60), touching && inRect(MB_SND, tx, ty), 0.5f);
+    button(MB_QUIT, "BEENDEN", C(70, 70, 76), touching && inRect(MB_QUIT, tx, ty), 0.5f);
+}
+
+static void drawHowTop(void) {
+    C2D_ViewReset();
+    C2D_DrawRectangle(0, 0, 0, W, 240, C(12, 9, 11), C(12, 9, 11), C(40, 28, 30), C(40, 28, 30));
+    txtS("SO FUNKTIONIERT'S", 200, 8, 0.7f, C(210, 40, 40), 1);
+    const char *lines[] = {
+        "Die Flinte hat scharfe und blinde Patronen.",
+        "Schieße auf den Dealer oder auf dich selbst.",
+        "Blinde Patrone auf dich selbst:",
+        "du bist gleich nochmal dran.",
+        "Wer kein Leben mehr hat, verliert.",
+        "Gewinne 3 Runden, um zu siegen!",
+        "Items tippst du unten an, um sie zu nutzen.",
+        "Tasten: A = Dealer, B = selbst, START = Menü"};
+    for (int i = 0; i < 8; i++) txtS(lines[i], 200, 50 + i * 21, 0.45f, C(230, 230, 230), 1);
+}
+
+static void drawHowBottom(int touching, int tx, int ty) {
+    C2D_ViewReset();
+    C2D_DrawRectSolid(0, 0, 0, 320, 240, C(14, 14, 20));
+    const char *desc[] = {"zeigt die aktuelle Patrone", "wirft die Patrone aus", "Dealer setzt einen Zug aus",
+                          "+1 Leben", "nächster Schuss x2"};
+    for (int i = 0; i < 5; i++) {
+        icon(i + 1, 10, 8 + i * 37, 1.0f);
+        txt(iname[i + 1], 54, 8 + i * 37, 0.45f, C(240, 200, 120), 0);
+        txt(desc[i], 54, 22 + i * 37, 0.4f, C(210, 210, 210), 0);
+    }
+    button(MB_BACK, "ZURÜCK", C(50, 60, 90), touching && inRect(MB_BACK, tx, ty), 0.5f);
+}
+
 /* ================= MAIN ================= */
 int main(void) {
     gfxInitDefault();
@@ -594,13 +711,12 @@ int main(void) {
     tbuf = C2D_TextBufNew(4096);
     srand((unsigned)time(NULL));
     initAudio();
-    play(S_DRONE, 0.12f);
-    newGame();
+    scene = 0;
+    setMusic(1);
 
-    while (aptMainLoop()) {
+    while (aptMainLoop() && !quit) {
         hidScanInput();
         u32 kd = hidKeysDown(), kh = hidKeysHeld();
-        if (kd & KEY_START) break;
         touchPosition tp;
         hidTouchRead(&tp);
         int tx = tp.px, ty = tp.py;
@@ -608,52 +724,85 @@ int main(void) {
         int tapped = (kd & KEY_TOUCH) != 0;
         frame++;
 
-        if (banner > 0) {
-            banner--;
-            if (banner == 0) dealT = 30;
-        } else if (animState == 1) {
-            animT++;
-            if (animT >= 28) { resolveShot(); animState = 2; animT = 0; }
-        } else if (animState == 2) {
-            animT++;
-            if (animT >= 40) {
-                animState = 0;
-                dealT = 40;
-                if (pendingNext) { pendingNext = 0; round_++; startRound(); }
-                else if (needReload) { needReload = 0; load("NEU GELADEN"); }
+        if (scene == 0) {
+            if (kd & KEY_START) quit = 1;
+            if ((kd & KEY_A) || (tapped && inRect(MB_START, tx, ty))) {
+                play(S_START, 0.8f);
+                scene = 2;
+                setMusic(0);
+                newGame();
+            } else if (tapped) {
+                if (inRect(MB_HOW, tx, ty)) { scene = 1; play(S_TICK, 0.6f); }
+                else if (inRect(MB_SND, tx, ty)) { soundOn = !soundOn; setMusic(1); play(S_TICK, 0.6f); }
+                else if (inRect(MB_QUIT, tx, ty)) quit = 1;
             }
-        } else if (state == 0) {
-            if (turn == 0) {
-                if (kd & KEY_A) startShot(0, 0);
-                else if (kd & KEY_B) startShot(0, 1);
-                else if (tapped) {
-                    if (inRect(BTN_D, tx, ty)) startShot(0, 0);
-                    else if (inRect(BTN_S, tx, ty)) startShot(0, 1);
-                    else {
-                        for (int i = 0; i < MAXI; i++) {
-                            if (inRect(slotRect(i), tx, ty) && pl.items[i]) {
-                                if (!useItem(0, pl.items[i])) { addlog("Das geht gerade nicht"); play(S_ERR, 0.6f); }
-                                break;
+        } else if (scene == 1) {
+            if ((kd & (KEY_A | KEY_B | KEY_START)) || (tapped && inRect(MB_BACK, tx, ty))) {
+                scene = 0;
+                play(S_TICK, 0.6f);
+            }
+        } else {
+            if ((kd & KEY_START) || (tapped && state == 0 && inRect(BTN_M, tx, ty)) ||
+                (tapped && state != 0 && !animState && inRect(GO_MENU, tx, ty))) {
+                scene = 0;
+                animState = 0;
+                setMusic(1);
+                play(S_TICK, 0.6f);
+            } else if (banner) {
+                bannerT++;
+                if (bannerT > 45 && (tapped || (kd & KEY_A))) {
+                    banner = 0;
+                    dealT = 70;
+                    play(S_TICK, 0.5f);
+                }
+            } else if (animState == 1) {
+                animT++;
+                if (animT >= AIMT) { resolveShot(); animState = 2; animT = 0; }
+            } else if (animState == 2) {
+                animT++;
+                if (animT >= FIRET) {
+                    animState = 0;
+                    dealT = 70;
+                    if (pendingNext) { pendingNext = 0; round_++; startRound(); play(S_ROUND, 0.8f); }
+                    else if (needReload) { needReload = 0; load("NEU GELADEN"); }
+                }
+            } else if (state == 0) {
+                if (turn == 0) {
+                    if (kd & KEY_A) startShot(0, 0);
+                    else if (kd & KEY_B) startShot(0, 1);
+                    else if (tapped) {
+                        if (inRect(BTN_D, tx, ty)) startShot(0, 0);
+                        else if (inRect(BTN_S, tx, ty)) startShot(0, 1);
+                        else {
+                            for (int i = 0; i < MAXI; i++) {
+                                if (inRect(slotRect(i), tx, ty) && pl.items[i]) {
+                                    if (!useItem(0, pl.items[i])) { addlog("Das geht gerade nicht"); play(S_ERR, 0.6f); }
+                                    break;
+                                }
                             }
                         }
                     }
+                } else {
+                    if (dealT > 0) dealT--;
+                    else { dealerAct(); dealT = 100; }
                 }
             } else {
-                if (dealT > 0) dealT--;
-                else { dealerAct(); dealT = 55; }
+                if ((kd & KEY_A) || (tapped && inRect(GO_AGAIN, tx, ty))) { play(S_START, 0.8f); newGame(); }
             }
-        } else {
-            if ((kd & KEY_A) || tapped) newGame();
         }
 
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         C2D_TextBufClear(tbuf);
         C2D_TargetClear(top, C(0, 0, 0));
         C2D_SceneBegin(top);
-        drawTop();
+        if (scene == 0) drawMenuTop();
+        else if (scene == 1) drawHowTop();
+        else drawTop();
         C2D_TargetClear(bot, C(0, 0, 0));
         C2D_SceneBegin(bot);
-        drawBottom(touching, tx, ty);
+        if (scene == 0) drawMenuBottom(touching, tx, ty);
+        else if (scene == 1) drawHowBottom(touching, tx, ty);
+        else drawBottom(touching, tx, ty);
         C3D_FrameEnd(0);
     }
 
